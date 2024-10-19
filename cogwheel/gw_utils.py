@@ -3,6 +3,9 @@ import scipy.interpolate
 import numpy as np
 import lal
 
+from astropy.time import Time
+from astropy.coordinates import EarthLocation
+
 from cogwheel import utils
 
 
@@ -86,6 +89,52 @@ def get_geocenter_delays(detector_names, lat, lon):
     return -np.einsum('di,i...->d...', locations, direction) / lal.C_SI
 
 
+def tgps_to_gmst(gpssec, gpsnan = 0, taiutc = 37):
+    """
+    Convert GPS time to Greenwich Mean Sidereal Time (GMST).
+    
+    Parameters:
+    gpssec : INT4 - GPS seconds since the epoch (1980-01-06 00:00:00 UTC)
+    gpsnan : INT4 - Nanoseconds within the current GPS second
+    taiutc : INT4 - Leap seconds difference between TAI and UTC
+
+    Returns:
+    gmst : REAL8 - GMST in radians
+    """
+
+
+    # Constants
+    JD_12h_01_Jan_2000 = 2451545.0
+    JD_00h_01_Jan_2000 = 2451544.5
+    GPS_00h_01_Jan_2000 = 630720013
+    TAIUTC_00h_01_Jan_2000 = 32  # leap seconds: TAI - UTC
+    LALIND_TWOPI = 2.0 * np.pi  # 2π
+    
+    # Compute number of seconds since 00h UT 01 Jan 2000
+    t = gpssec - GPS_00h_01_Jan_2000
+    t += 1e-9 * gpsnan
+    t += taiutc - TAIUTC_00h_01_Jan_2000
+
+    # Compute number of days since 12h UT 01 Jan 2000
+    dpU = np.floor(t / (24.0 * 3600.0))  # full days since 0h UT 01 Jan 2000
+    dpU += JD_00h_01_Jan_2000 - JD_12h_01_Jan_2000  # i.e., -0.5
+
+    # Compute number of centuries since 12h UT 31 Dec 1899
+    TpU = dpU / 36525.0
+
+    # Compute the GMST at 0h of the current day
+    gmst = 24110.54841 + TpU * (8640184.812866 + TpU * (0.093104 - TpU * 6.2e-6))  # seconds
+
+    # Add the sidereal time since the start of the day
+    t = np.fmod(t, 24.0 * 3600.0)  # seconds since start of day
+    gmst += t * 1.002737909350795  # corrections omitted
+
+    # Convert to fractions of a day and to radians
+    gmst = np.fmod(gmst / (24.0 * 3600.0), 1.0)  # fraction of day
+    gmst *= LALIND_TWOPI  # radians
+
+    return gmst
+    
 def get_fplus_fcross_0(detector_names, lat, lon):
     """
     Return array with antenna response functions fplus, fcross with

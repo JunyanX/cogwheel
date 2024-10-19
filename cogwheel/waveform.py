@@ -8,6 +8,13 @@ import lalsimulation
 
 from cogwheel import gw_utils
 from cogwheel import utils
+from scipy.interpolate import interp1d
+from cogwheel.frequency_dependent_response import get_antenna_response
+
+from cogwheel.gw_utils import get_geocenter_delays, tgps_to_gmst
+from cogwheel.skyloc_angles import ra_to_lon
+
+
 
 ZERO_INPLANE_SPINS = {'s1x_n': 0.,
                       's1y_n': 0.,
@@ -225,6 +232,146 @@ def within_bounds(par_dic: dict) -> bool:
             and np.abs(par_dic.get('dec', 0)) <= np.pi/2
            )
 
+def get_phase_from_frequency_domain_waveform(hp):
+    """
+    Calculates the phase from the frequency-domain gravitational wave polarization h+.
+
+    Parameters:
+    - hp (numpy array): Array containing the plus polarization (h+) in the frequency domain.
+
+    Returns:
+    - phase_unwrapped_hp (numpy array): Unwrapped phase of the plus polarization (h+).
+    """
+
+    # Calculate the phase for h+
+    phase_hp = np.angle(hp)
+
+    # Unwrap the phase to ensure continuity
+    phase_unwrapped_hp = np.unwrap(phase_hp)
+
+    return phase_unwrapped_hp
+
+
+
+def generate_time_frequency_mapping(hp, frequencies):
+    """
+    Generates the time-frequency mapping for a gravitational wave signal using the frequency domain waveform.
+
+    Parameters:
+    - hp (numpy array): Array containing the plus polarization (h+) in the frequency domain.
+    - frequencies (numpy array): Array of frequency values.
+
+    Returns:
+    - time_hp (numpy array): Array of time values corresponding to the instantaneous frequency for h+.
+    """
+    
+    # Get the unwrapped phase for h+ from the frequency domain waveform
+    phase_unwrapped_hp = get_phase_from_frequency_domain_waveform(hp)
+
+    # Calculate the instantaneous time as the derivative of the phase with respect to frequency for h+
+    time_hp = -np.gradient(phase_unwrapped_hp) / (2.0 * np.pi * np.gradient(frequencies))
+
+    # Return the time array for h+
+    return time_hp
+
+
+def extract_monotonic_increasing_segment(time, frequency, min_freq_step=0.1):
+    """
+    Extracts the longest monotonic increasing part of the time-frequency mapping based on the frequency span,
+    after discarding the part where time is greater than 0, and using frequency steps to check monotonicity.
+
+    Parameters:
+    - time (numpy array): Array of time values.
+    - frequency (numpy array): Array of frequency values.
+    - min_freq_step (float): Minimum allowed frequency step over which to check monotonicity (default is 0.1 Hz).
+
+    Returns:
+    - time_mono (numpy array): Time array corresponding to the longest monotonic increasing segment.
+    - frequency_mono (numpy array): Frequency array corresponding to the longest monotonic increasing segment.
+    """
+
+    # Discard any part where time > 0
+    mask = time <= 0
+    time = time[mask]
+    frequency = frequency[mask]
+
+    max_freq_span = 0
+    max_start = 0
+    max_end = 0
+    current_start = 0
+    current_end = 0
+
+    i = 0
+    n = len(frequency)  # length of frequency array
+
+    # Step through the frequency array, checking intervals of min_freq_step
+    while i < n - 1:
+        # Find the next frequency that is at least min_freq_step larger
+        next_idx = i + 1
+        while next_idx < n and frequency[next_idx] - frequency[i] < min_freq_step:
+            next_idx += 1
+
+        # Ensure next_idx doesn't exceed the array bounds
+        if next_idx >= n:
+            break
+
+        # If we found a valid next frequency
+        if time[next_idx] > time[i]:
+            current_end = next_idx
+        else:
+            # End the current segment and check its frequency span
+            current_freq_span = frequency[current_end] - frequency[current_start]
+            if current_freq_span > max_freq_span:
+                max_freq_span = current_freq_span
+                max_start = current_start
+                max_end = current_end
+            
+            # Start a new segment, ensure next_idx doesn't exceed bounds
+            if next_idx < n:
+                current_start = next_idx
+                current_end = next_idx
+            else:
+                break
+
+        # Move the index forward
+        i = next_idx
+
+    # Final check for the last segment
+    current_freq_span = frequency[current_end] - frequency[current_start]
+    if current_freq_span > max_freq_span:
+        max_start = current_start
+        max_end = current_end
+
+    # Slice the time and frequency arrays to keep only the longest frequency span segment
+    time_mono = time[max_start:max_end + 1]
+    frequency_mono = frequency[max_start:max_end + 1]
+
+    return time_mono, frequency_mono
+
+
+def generate_interpolation_function(hp, frequencies):
+    """
+    Generates an interpolation function for the time-frequency mapping of the h+ polarization.
+
+    Parameters:
+    - hp (numpy array): Array containing the plus polarization (h+) in the frequency domain.
+    - frequencies (numpy array): Array of frequency values.
+
+    Returns:
+    - interp_func_hp (scipy.interpolate.interp1d): Interpolation function for h+ mapping frequency to time.
+    """
+    
+    # Generate the time-frequency mapping for h+
+    time_hp = generate_time_frequency_mapping(hp, frequencies)
+
+    # Extract the longest monotonic increasing segment for h+
+    time_mono_hp, frequency_mono_hp = extract_monotonic_increasing_segment(time_hp, frequencies)
+
+    # Generate interpolation function for h+
+    interp_func_hp = interp1d(frequency_mono_hp, time_mono_hp, kind='linear', fill_value="extrapolate")
+
+    return interp_func_hp
+
 
 class WaveformGenerator(utils.JSONMixin):
     """
@@ -379,26 +526,80 @@ class WaveformGenerator(utils.JSONMixin):
         return map(list, zip(*itertools.combinations_with_replacement(
             range(len(self._harmonic_modes_by_m)), 2)))
 
-    def get_strain_at_detectors(self, f, par_dic, by_m=False):
+    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization = False, doppler = False, f_lower = 2):
         """
-        Get strain measurable at detectors.
-
+        Get strain measurable at detectors with time-dependent antenna response.
+    
         Parameters
         ----------
         f: 1d array of frequencies [Hz]
         par_dic: parameter dictionary per `WaveformGenerator.params`.
         by_m: bool, whether to return waveform separated by `m`
               harmonic mode (summed over `l`), or already summed.
-
+        time_varying: bool, whether to account for time-varying antenna response.
+    
         Return
         ------
         Array of shape (n_m?, n_detectors, n_frequencies) with strain at
         detector, `n_m` is there only if `by_m=True`.
         """
+    
         # shape: (n_m?, 2, n_detectors, n_frequencies)
-        hplus_hcross_at_detectors = self.get_hplus_hcross_at_detectors(
-            f, par_dic, by_m)
+        hplus_hcross_at_detectors = self.get_hplus_hcross_at_detectors(f, par_dic, by_m, doppler)
+        n_detectors = len(self.detector_names)
 
+    
+        if vary_polarization:
+
+            ts = self.time_series(f, par_dic, by_m)
+            
+            # If by_m is False, handle the (2, n_detectors, n_frequencies) case
+            if not by_m:
+                fplus_fcross = np.zeros((2, n_detectors, len(f)), dtype = complex)
+    
+            
+                for d in range(n_detectors):
+    
+                    for i, frequency in enumerate(f):
+                        delta_t = ts[i]
+                        gmst = tgps_to_gmst(self.tgps + delta_t)
+    
+                        # Use the new get_antenna_response function
+                        fplus, fcross = get_antenna_response(frequency, par_dic['ra'], par_dic['dec'], gmst, par_dic['psi'], self.detector_names[d])
+    
+                        # Assign the antenna responses
+                        fplus_fcross[0, d, i] = fplus # F+ for hp
+                        fplus_fcross[1, d, i] = fcross # Fx for hc
+    
+                # Compute strain
+                strain = np.einsum('pdf, pdf -> df', fplus_fcross, hplus_hcross_at_detectors)
+    
+            else:
+                n_m = hplus_hcross_at_detectors.shape[0]
+                fplus_fcross = np.zeros((n_m, 2, n_detectors, len(f)), dtype = complex)
+    
+                for m in range(n_m):
+                    # Iterate over each detector
+                    for d in range(n_detectors):
+                        # Generate interpolation functions for each detector
+    
+                        for i, frequency in enumerate(f):
+                            delta_t = ts[i]
+                            gmst = tgps_to_gmst(self.tgps + delta_t)
+    
+                            # Use the new get_antenna_response function
+                            fplus, fcross = get_antenna_response(frequency, par_dic['ra'], par_dic['dec'], gmst, par_dic['psi'], self.detector_names[d])
+    
+                            # Assign the antenna responses
+                            fplus_fcross[m, 0, d, i] = fplus  # F+ for hp
+                            fplus_fcross[m, 1, d, i] = fcross  # Fx for hc
+    
+                # Compute strain
+                strain = np.einsum('mpdf, mpdf -> mdf', fplus_fcross, hplus_hcross_at_detectors)
+    
+            return strain
+    
+    
         # fplus_fcross shape: (2, n_detectors)
         fplus_fcross = gw_utils.fplus_fcross(
             self.detector_names, par_dic['ra'], par_dic['dec'], par_dic['psi'],
@@ -408,43 +609,74 @@ class WaveformGenerator(utils.JSONMixin):
         return np.einsum('pd, ...pdf -> ...df',
                          fplus_fcross, hplus_hcross_at_detectors)
 
-    def get_hplus_hcross_at_detectors(self, f, par_dic, by_m=False):
-        """
-        Return plus and cross polarizations with time shifts applied
-        (but no fplus, fcross).
 
+
+    def get_hplus_hcross_at_detectors(self, f, par_dic, by_m=False, doppler = False):
+        """
+        Return plus and cross polarizations with time shifts applied, including Doppler shift.
+        
         Parameters
         ----------
-        f: 1d array of frequencies [Hz]
-        par_dic: parameter dictionary per `WaveformGenerator.params`.
-        by_m: bool, whether to return waveform separated by `m`
-              harmonic mode (summed over `l`), or already summed.
-
-        Return
-        ------
-        Array of shape (n_m?, 2, n_detectors, n_frequencies) with hplus,
-        hcross at detector, `n_m` is there only if `by_m=True`.
+        f : 1d array of frequencies [Hz]
+        par_dic : dict
+            Parameter dictionary per `WaveformGenerator.params`.
+        by_m : bool
+            Whether to return waveform separated by `m` harmonic mode (summed over `l`), or already summed.
+        time_varying : bool
+            Whether to apply time-dependent Doppler shift.
+    
+        Returns
+        -------
+        Array of shape (n_m?, 2, n_detectors, n_frequencies) with hplus, hcross at detector, `n_m` is there only if `by_m=True`.
         """
+        
         waveform_par_dic = {par: par_dic[par] for par in self._waveform_params}
-
+    
         # hplus_hcross shape: (n_m?, 2, n_frequencies)
         hplus_hcross = self.get_hplus_hcross(f, waveform_par_dic, by_m)
-
+    
         # shifts shape: (n_detectors, n_frequencies)
         if not np.array_equal(f, self._cached_f):
             self._get_shifts.cache_clear()
             self._cached_f = f
-        shifts = self._get_shifts(par_dic['ra'], par_dic['dec'],
-                                  par_dic['t_geocenter'])
-
+    
+        # Doppler term (time shifts due to motion of the Earth/detector)
+        if doppler:
+            ts = self.time_series(f, par_dic, by_m)
+            shifts = np.zeros((len(self.detector_names), len(f)), dtype=complex)
+    
+            # Iterate over each detector
+            for d in range(len(self.detector_names)):
+                # Generate interpolation function for this detector and harmonic mode
+                if by_m:
+                    delta_t_func = generate_interpolation_function(hplus_hcross[0, d, :], f)
+                else:
+                    delta_t_func = generate_interpolation_function(hplus_hcross[d, :], f)
+                
+                # Compute and apply delta_t for each frequency individually
+                for i, frequency in enumerate(f):
+                    delta_t = ts[i]  # Get the time delay at this frequency
+                    all_shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'], delta_t)
+                    shifts[d, i] = all_shifts[d, i]
+        
+        else:
+            # No time-varying Doppler effect; just use the standard time delay without delta_t
+            shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'])
+    
         # hplus, hcross (n_m?, 2, n_detectors, n_frequencies)
         return np.einsum('...pf, df -> ...pdf', hplus_hcross, shifts)
 
+
+
     @utils.lru_cache(maxsize=16)
-    def _get_shifts(self, ra, dec, t_geocenter):
+    def _get_shifts(self, ra, dec, t_geocenter, delta_t = 0):
         """Return (n_detectors, n_frequencies) array with e^(-2 i f t_det)."""
-        time_delays = gw_utils.time_delay_from_geocenter(
-            self.detector_names, ra, dec, self.tgps)
+        gmst = tgps_to_gmst(t_geocenter + delta_t)
+        lon = ra_to_lon(ra, gmst)
+        lat = dec
+
+        time_delays = gw_utils.get_geocenter_delays(
+            self.detector_names, lat, lon)
         return np.exp(-2j*np.pi * self._cached_f
                       * (self.tcoarse
                          + t_geocenter
@@ -545,3 +777,57 @@ class WaveformGenerator(utils.JSONMixin):
                 return cache_dic
 
         return False
+
+    def get_f_finer(self, f, delta_f_finer = 1/2**18, delta_f_coarse = 1/2**10):
+    
+        f_min = np.min(f)
+        f_max = np.max(f)
+        
+        if np.mean(np.diff(f)) <= delta_f_finer:
+            f_finer = f
+            
+        else: 
+            f_finer = np.arange(f_min, f_max, delta_f_finer)
+    
+        return f_finer
+
+
+    def time_series(self, f, par_dic, by_m=False, f_lower = 2):
+        """
+        Generate the full time series based on the given frequency array, using 
+        finer frequencies if frequency grid is too coarse.
+        
+        Parameters
+        ----------
+        f : array-like
+            Frequency array for generating the time series.
+        par_dic : dict
+            Dictionary of parameters.
+        by_m : bool, optional
+            Whether to return waveform separated by m harmonic mode, by default False.
+
+        f_lower: float, lower threshold of frequency
+    
+        Returns
+        -------
+        t_full : array-like
+            Full time series array.
+        """
+        f_finer = self.get_f_finer(f)
+        f_finer = f_finer[f_finer >= f_lower]
+    
+        hp_finer = self.get_hplus_hcross(f_finer, par_dic, by_m)[0, :]
+        t_interp_finer = generate_interpolation_function(hp_finer, f_finer)
+    
+        # Initialize the time array
+        time_series = np.zeros_like(f)
+    
+        for i, freq in enumerate(f):
+            time_series[i] = t_interp_finer(freq)
+    
+        return time_series
+    
+        
+
+
+        
