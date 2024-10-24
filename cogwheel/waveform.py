@@ -418,6 +418,7 @@ class WaveformGenerator(utils.JSONMixin):
         self.n_fast_evaluations = 0
 
         self._cached_f = None
+        self.ts = None
 
     @classmethod
     def from_event_data(cls, event_data, approximant,
@@ -552,6 +553,7 @@ class WaveformGenerator(utils.JSONMixin):
         if vary_polarization:
 
             ts = self.time_series(f, par_dic, by_m)
+            self.ts = ts
             
             # If by_m is False, handle the (2, n_detectors, n_frequencies) case
             if not by_m:
@@ -643,25 +645,9 @@ class WaveformGenerator(utils.JSONMixin):
         # Doppler term (time shifts due to motion of the Earth/detector)
         if doppler:
             ts = self.time_series(f, par_dic, by_m)
-            shifts = np.zeros((len(self.detector_names), len(f)), dtype=complex)
-    
-            # Iterate over each detector
-            for d in range(len(self.detector_names)):
-                # Generate interpolation function for this detector and harmonic mode
-                if by_m:
-                    delta_t_func = generate_interpolation_function(hplus_hcross[0, d, :], f)
-                else:
-                    delta_t_func = generate_interpolation_function(hplus_hcross[d, :], f)
-                
-                # Compute and apply delta_t for each frequency individually
-                for i, frequency in enumerate(f):
-                    delta_t = ts[i]  # Get the time delay at this frequency
-                    all_shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'], delta_t)
-                    shifts[d, i] = all_shifts[d, i]
-        
-        else:
-            # No time-varying Doppler effect; just use the standard time delay without delta_t
-            shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'])
+            self.ts = ts
+            
+        shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'], doppler)
     
         # hplus, hcross (n_m?, 2, n_detectors, n_frequencies)
         return np.einsum('...pf, df -> ...pdf', hplus_hcross, shifts)
@@ -669,18 +655,38 @@ class WaveformGenerator(utils.JSONMixin):
 
 
     @utils.lru_cache(maxsize=16)
-    def _get_shifts(self, ra, dec, t_geocenter, delta_t = 0):
+    def _get_shifts(self, ra, dec, t_geocenter, doppler):
         """Return (n_detectors, n_frequencies) array with e^(-2 i f t_det)."""
-        gmst = tgps_to_gmst(t_geocenter + delta_t)
-        lon = ra_to_lon(ra, gmst)
-        lat = dec
+        
+        if not doppler:
+            gmst = tgps_to_gmst(t_geocenter)
+            lon = ra_to_lon(ra, gmst)
+            lat = dec
+    
+            time_delays = gw_utils.get_geocenter_delays(
+                self.detector_names, lat, lon)
+            
+            return np.exp(-2j*np.pi * self._cached_f
+                      * (self.tcoarse
+                         + t_geocenter
+                         + time_delays[:,np.newaxis]))
 
-        time_delays = gw_utils.get_geocenter_delays(
-            self.detector_names, lat, lon)
+        lat = dec
+        time_delays = []
+        
+        for t in self.ts:
+            gmst = tgps_to_gmst(t_geocenter + t)
+            lon = ra_to_lon(ra, gmst)
+ 
+            time_delays.append(gw_utils.get_geocenter_delays(self.detector_names, lat, lon).squeeze())
+
+        time_delays = np.array(time_delays)
+            
+            
         return np.exp(-2j*np.pi * self._cached_f
                       * (self.tcoarse
                          + t_geocenter
-                         + time_delays[:, np.newaxis]))
+                         + time_delays)).reshape(1, -1)
 
     def get_hplus_hcross(self, f, waveform_par_dic, by_m=False):
         """
