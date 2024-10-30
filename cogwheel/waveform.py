@@ -523,7 +523,7 @@ class WaveformGenerator(utils.JSONMixin):
         return map(list, zip(*itertools.combinations_with_replacement(
             range(len(self._harmonic_modes_by_m)), 2)))
 
-    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization = False, doppler = False, f_lower = 2):
+    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization = False, doppler = False, f_lower = 2, f_higher = 10):
         """
         Get strain measurable at detectors with time-dependent antenna response.
     
@@ -546,7 +546,7 @@ class WaveformGenerator(utils.JSONMixin):
         n_detectors = len(self.detector_names)
 
         if vary_polarization or doppler:
-            self.ts = self.time_series(f, par_dic, by_m)
+            self.ts = self.time_series(f, par_dic, by_m, f_lower, f_higher)
 
     
         if vary_polarization:
@@ -778,24 +778,51 @@ class WaveformGenerator(utils.JSONMixin):
 
         return False
 
-    def get_f_finer(self, f, delta_f_finer = 1/2**18, delta_f_coarse = 1/2**10):
+    def get_f_finer(self, f, delta_f_finer=1/2**18, delta_f_coarse=1/2**10):
+        """
+        Generate finer and coarser frequency grids based on the input frequency range.
     
+        Parameters
+        ----------
+        f : array-like
+            Input frequency array.
+        delta_f_finer : float, optional
+            Frequency step for finer grid, by default 1/2**18.
+        delta_f_coarse : float, optional
+            Frequency step for coarse grid, by default 1/2**10.
+    
+        Returns
+        -------
+        f_finer : numpy array
+            Finer frequency grid array.
+        f_coarse : numpy array
+            Coarser frequency grid array.
+        """
         f_min = np.min(f)
         f_max = np.max(f)
-        
-        if np.mean(np.diff(f)) <= delta_f_finer:
-            f_finer = f
-            
-        else: 
-            f_finer = np.arange(f_min, f_max, delta_f_finer)
+        mean_delta_f = np.mean(np.diff(f))
     
-        return f_finer
+        # Determine f_finer and f_coarse based on mean_delta_f
+        if mean_delta_f <= delta_f_finer:
+            f_finer = f
+            f_coarse = f
+            
+        elif mean_delta_f <= delta_f_coarse:
+            f_finer = np.arange(f_min, f_max, delta_f_finer)
+            f_coarse = f
+            
+        else:
+            f_finer = np.arange(f_min, f_max, delta_f_finer)
+            f_coarse = np.arange(f_min, f_max, delta_f_coarse)
+    
+        return f_finer, f_coarse
 
 
-    def time_series(self, f, par_dic, by_m=False, f_lower = 2):
+
+    def time_series(self, f, par_dic, by_m=False, f_lower=2, f_higher=10):
         """
         Generate the full time series based on the given frequency array, using 
-        finer frequencies if frequency grid is too coarse.
+        finer frequencies at lower frequencies and coarse frequencies at higher frequencies.
         
         Parameters
         ----------
@@ -805,27 +832,42 @@ class WaveformGenerator(utils.JSONMixin):
             Dictionary of parameters.
         by_m : bool, optional
             Whether to return waveform separated by m harmonic mode, by default False.
-
-        f_lower: float, lower threshold of frequency
+        f_lower : float, optional
+            Lower threshold of frequency, by default 2.
+        f_higher : float, optional
+            Higher threshold of frequency, by default 10.
     
         Returns
         -------
         t_full : array-like
             Full time series array.
         """
-        f_finer = self.get_f_finer(f)
-        f_finer = f_finer[f_finer >= f_lower]
+        # Generate finer frequency grid within [f_lower, f_higher]
+        f_finer, f_coarse = self.get_f_finer(f)
+        f_finer = f_finer[(f_finer >= f_lower) & (f_finer <= f_higher)]
+        f_coarse = f_coarse[f_coarse >= f_higher]
+        
     
+        # Compute hp for finer and coarse frequency segments
         hp_finer = self.get_hplus_hcross(f_finer, par_dic, by_m)[0, :]
-        t_interp_finer = generate_interpolation_function(hp_finer, f_finer)
+        hp_coarse = self.get_hplus_hcross(f_coarse, par_dic, by_m)[0, :]
     
-        # Initialize the time array
+        # Create interpolation functions for both segments
+        t_interp_finer = generate_interpolation_function(hp_finer, f_finer)
+        t_interp_coarse = generate_interpolation_function(hp_coarse, f_coarse)
+    
+        # Initialize the time series array
         time_series = np.zeros_like(f)
     
+        # Populate time_series using the two interpolation functions
         for i, freq in enumerate(f):
-            time_series[i] = t_interp_finer(freq)
+            if f_lower <= freq <= f_higher:
+                time_series[i] = t_interp_finer(freq)
+            elif freq > f_higher:
+                time_series[i] = t_interp_coarse(freq)
     
         return time_series
+
     
         
 
