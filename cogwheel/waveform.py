@@ -301,21 +301,19 @@ def extract_monotonic_increasing_segment(time, frequency, min_freq_step=0.1):
     current_start = 0
     current_end = 0
 
+    n = len(frequency)  # Length of frequency array
     i = 0
-    n = len(frequency)  # length of frequency array
 
-    # Step through the frequency array, checking intervals of min_freq_step
+    # Step through the frequency array, using np.searchsorted to find the next index
     while i < n - 1:
-        # Find the next frequency that is at least min_freq_step larger
-        next_idx = i + 1
-        while next_idx < n and frequency[next_idx] - frequency[i] < min_freq_step:
-            next_idx += 1
+        # Find the next index where frequency is at least min_freq_step larger than frequency[i]
+        next_idx = np.searchsorted(frequency, frequency[i] + min_freq_step, side='right')
 
         # Ensure next_idx doesn't exceed the array bounds
         if next_idx >= n:
             break
 
-        # If we found a valid next frequency
+        # Check if the time is still increasing
         if time[next_idx] > time[i]:
             current_end = next_idx
         else:
@@ -325,13 +323,10 @@ def extract_monotonic_increasing_segment(time, frequency, min_freq_step=0.1):
                 max_freq_span = current_freq_span
                 max_start = current_start
                 max_end = current_end
-            
-            # Start a new segment, ensure next_idx doesn't exceed bounds
-            if next_idx < n:
-                current_start = next_idx
-                current_end = next_idx
-            else:
-                break
+
+            # Start a new segment
+            current_start = next_idx
+            current_end = next_idx
 
         # Move the index forward
         i = next_idx
@@ -347,6 +342,7 @@ def extract_monotonic_increasing_segment(time, frequency, min_freq_step=0.1):
     frequency_mono = frequency[max_start:max_end + 1]
 
     return time_mono, frequency_mono
+
 
 
 def generate_interpolation_function(hp, frequencies):
@@ -549,11 +545,13 @@ class WaveformGenerator(utils.JSONMixin):
         hplus_hcross_at_detectors = self.get_hplus_hcross_at_detectors(f, par_dic, by_m, doppler)
         n_detectors = len(self.detector_names)
 
+        if vary_polarization or doppler:
+            self.ts = self.time_series(f, par_dic, by_m)
+
     
         if vary_polarization:
 
-            ts = self.time_series(f, par_dic, by_m)
-            self.ts = ts
+            ts = self.ts
             
             # If by_m is False, handle the (2, n_detectors, n_frequencies) case
             if not by_m:
@@ -641,11 +639,7 @@ class WaveformGenerator(utils.JSONMixin):
         if not np.array_equal(f, self._cached_f):
             self._get_shifts.cache_clear()
             self._cached_f = f
-    
-        # Doppler term (time shifts due to motion of the Earth/detector)
-        if doppler:
-            ts = self.time_series(f, par_dic, by_m)
-            self.ts = ts
+
             
         shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'], doppler)
     
