@@ -547,7 +547,7 @@ class WaveformGenerator(utils.JSONMixin):
         n_detectors = len(self.detector_names)
 
         if vary_polarization or doppler:
-            if self._cached_t is None or use_cached:
+            if self._cached_t is None or not use_cached:
                 self._cached_t = self.time_series(f, par_dic, by_m, f_lower, f_higher)
 
     
@@ -556,7 +556,7 @@ class WaveformGenerator(utils.JSONMixin):
             ts = self._cached_t
 
             
-            if self._cached_fp_fc is None or use_cached:
+            if self._cached_fp_fc is None or not use_cached:
                 n_m = hplus_hcross_at_detectors.shape[0]
                 fplus_fcross = self.compute_fplus_fcross(f, par_dic['ra'], par_dic['dec'], par_dic['psi'])
                 self._cached_fp_fc = fplus_fcross
