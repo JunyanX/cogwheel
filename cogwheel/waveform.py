@@ -414,7 +414,8 @@ class WaveformGenerator(utils.JSONMixin):
         self.n_fast_evaluations = 0
 
         self._cached_f = None
-        self.ts = None
+        self._cached_t = None
+        self._cached_fp_fc = None
 
     @classmethod
     def from_event_data(cls, event_data, approximant,
@@ -523,7 +524,7 @@ class WaveformGenerator(utils.JSONMixin):
         return map(list, zip(*itertools.combinations_with_replacement(
             range(len(self._harmonic_modes_by_m)), 2)))
 
-    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization = False, doppler = False, f_lower = 2, f_higher = 10):
+    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization = False, doppler = False, f_lower = 2, f_higher = 10, use_cached = False):
         """
         Get strain measurable at detectors with time-dependent antenna response.
     
@@ -546,56 +547,26 @@ class WaveformGenerator(utils.JSONMixin):
         n_detectors = len(self.detector_names)
 
         if vary_polarization or doppler:
-            self.ts = self.time_series(f, par_dic, by_m, f_lower, f_higher)
+            if self._cached_t is None or use_cached:
+                self._cached_t = self.time_series(f, par_dic, by_m, f_lower, f_higher)
 
     
         if vary_polarization:
 
-            ts = self.ts
+            ts = self._cached_t
+
             
-            # If by_m is False, handle the (2, n_detectors, n_frequencies) case
-            if not by_m:
-                fplus_fcross = np.zeros((2, n_detectors, len(f)), dtype = complex)
-    
-            
-                for d in range(n_detectors):
-    
-                    for i, frequency in enumerate(f):
-                        delta_t = ts[i]
-                        gmst = tgps_to_gmst(self.tgps + delta_t)
-    
-                        # Use the new get_antenna_response function
-                        fplus, fcross = get_antenna_response(frequency, par_dic['ra'], par_dic['dec'], gmst, par_dic['psi'], self.detector_names[d])
-    
-                        # Assign the antenna responses
-                        fplus_fcross[0, d, i] = fplus # F+ for hp
-                        fplus_fcross[1, d, i] = fcross # Fx for hc
-    
-                # Compute strain
-                strain = np.einsum('pdf, pdf -> df', fplus_fcross, hplus_hcross_at_detectors)
-    
-            else:
+            if self._cached_fp_fc is None or use_cached:
                 n_m = hplus_hcross_at_detectors.shape[0]
-                fplus_fcross = np.zeros((n_m, 2, n_detectors, len(f)), dtype = complex)
+                fplus_fcross = self.compute_fplus_fcross(f, par_dic['ra'], par_dic['dec'], par_dic['psi'])
+                self._cached_fp_fc = fplus_fcross
+
+            else:
+                fplus_fcross = self._cached_fp_fc
+
+                
+            strain = np.einsum('...pdf, ...pdf -> ...df', fplus_fcross, hplus_hcross_at_detectors)
     
-                for m in range(n_m):
-                    # Iterate over each detector
-                    for d in range(n_detectors):
-                        # Generate interpolation functions for each detector
-    
-                        for i, frequency in enumerate(f):
-                            delta_t = ts[i]
-                            gmst = tgps_to_gmst(self.tgps + delta_t)
-    
-                            # Use the new get_antenna_response function
-                            fplus, fcross = get_antenna_response(frequency, par_dic['ra'], par_dic['dec'], gmst, par_dic['psi'], self.detector_names[d])
-    
-                            # Assign the antenna responses
-                            fplus_fcross[m, 0, d, i] = fplus  # F+ for hp
-                            fplus_fcross[m, 1, d, i] = fcross  # Fx for hc
-    
-                # Compute strain
-                strain = np.einsum('mpdf, mpdf -> mdf', fplus_fcross, hplus_hcross_at_detectors)
     
             return strain
     
@@ -608,6 +579,26 @@ class WaveformGenerator(utils.JSONMixin):
         # Detector strain (n_m?, n_detectors, n_frequencies)
         return np.einsum('pd, ...pdf -> ...df',
                          fplus_fcross, hplus_hcross_at_detectors)
+
+    def compute_fplus_fcross(self, f, ra, dec, psi):
+
+        n_detectors = len(self.detector_names)
+        fplus_fcross = np.zeros((2, n_detectors, len(f)), dtype = complex)
+        
+        for d in range(n_detectors):
+        
+            for i, frequency in enumerate(f):
+                delta_t = self._cached_t[i]
+                gmst = tgps_to_gmst(self.tgps + delta_t)
+        
+                # Use the new get_antenna_response function
+                fplus, fcross = get_antenna_response(frequency, ra, dec, gmst, psi, self.detector_names[d])
+        
+                # Assign the antenna responses
+                fplus_fcross[0, d, i] = fplus # F+ for hp
+                fplus_fcross[1, d, i] = fcross # Fx for hc
+    
+        return fplus_fcross
 
 
 
@@ -668,7 +659,7 @@ class WaveformGenerator(utils.JSONMixin):
         lat = dec
         time_delays = []
         
-        for t in self.ts:
+        for t in self._cached_t:
             gmst = tgps_to_gmst(t_geocenter + t)
             lon = ra_to_lon(ra, gmst)
  

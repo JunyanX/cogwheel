@@ -156,6 +156,7 @@ def get_frequency_dependent_detector_tensor(detector_name, ra, dec, gmst, f, L=4
     
     # Calculate the detector tensor
     D_f = D_u * np.outer(u, u) - D_v * np.outer(v, v)
+        
     
     return D_f
 
