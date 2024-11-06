@@ -668,10 +668,10 @@ class WaveformGenerator(utils.JSONMixin):
         time_delays = np.array(time_delays)
             
             
-        return np.exp(-2j*np.pi * self._cached_f
+        return np.exp(-2j*np.pi * self._cached_f[:, np.newaxis]
                       * (self.tcoarse
                          + t_geocenter
-                         + time_delays)).reshape(1, -1)
+                         + time_delays)).T
 
     def get_hplus_hcross(self, f, waveform_par_dic, by_m=False):
         """
