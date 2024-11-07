@@ -38,7 +38,9 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
     data.
     """
     def __init__(self, event_data, waveform_generator, par_dic_0,
-                 fbin=None, pn_phase_tol=None, spline_degree=3):
+                 fbin=None, pn_phase_tol=None, spline_degree=3,
+                 vary_polarization=False, doppler=False,
+                 use_cached=False):
         """
         Parameters
         ----------
@@ -73,6 +75,10 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
         self._spline_degree = spline_degree
 
+        self.vary_polarization = vary_polarization
+        self.doppler = doppler
+        self.use_cached = use_cached
+
         # Backward compatibility fix, shouldn't happen in new code:
         if ({'s1x_n', 's1y_n', 's2x_n', 's2y_n'}.isdisjoint(par_dic_0.keys())
                 and {'s1x_n', 's1y_n', 's2x_n', 's2y_n'} <= set(self.params)
@@ -88,6 +94,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             self.pn_phase_tol = pn_phase_tol
         else:
             self.fbin = fbin
+            
 
     @abstractmethod
     def _set_summary(self):
@@ -642,7 +649,8 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
             self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
             self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
-                self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
+                self.fbin, self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
+                doppler=self.doppler, use_cached=self.use_cached)  # n_m x ndet x len(fbin)
 
             # Temporarily undo big time shift so waveform is smooth at
             # high frequencies:
@@ -681,7 +689,9 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         frequency resolution waveform.
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, par_dic, by_m=True)
+            self.fbin, par_dic, by_m=True, 
+            vary_polarization=self.vary_polarization,
+            doppler=self.doppler, use_cached=self.use_cached)
 
         ratio = scipy.interpolate.interp1d(
             self.fbin, h_fbin / self._h0_fbin, assume_sorted=True,

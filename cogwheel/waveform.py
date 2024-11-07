@@ -9,7 +9,7 @@ import lalsimulation
 from cogwheel import gw_utils
 from cogwheel import utils
 from scipy.interpolate import interp1d
-from frequency_dependent_response import get_antenna_response
+from cogwheel.frequency_dependent_response import get_antenna_response
 
 from cogwheel.gw_utils import get_geocenter_delays, tgps_to_gmst
 from cogwheel.skyloc_angles import ra_to_lon
@@ -524,7 +524,8 @@ class WaveformGenerator(utils.JSONMixin):
         return map(list, zip(*itertools.combinations_with_replacement(
             range(len(self._harmonic_modes_by_m)), 2)))
 
-    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization = False, doppler = False, f_lower = 2, f_higher = 10, use_cached = False):
+    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization=False, doppler=False, f_lower=2,
+                                f_higher=10, use_cached=False):
         """
         Get strain measurable at detectors with time-dependent antenna response.
     
@@ -630,6 +631,8 @@ class WaveformGenerator(utils.JSONMixin):
         if not np.array_equal(f, self._cached_f):
             self._get_shifts.cache_clear()
             self._cached_f = f
+            self._cached_t = None
+            self._cached_fp_fc = None
 
             
         shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'], doppler)
