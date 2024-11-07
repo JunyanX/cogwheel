@@ -106,6 +106,9 @@ def get_polarization_tensor1(ra, dec, gmst, psi):
 
 def D_scalar(f, n_e, L):
     """ Calculate the frequency-dependent detector scalar D(f, n_e) based on the new definition """
+    if f == 0:
+        return 0
+        
     c = lal.C_SI
     term1 = (1 - np.exp(-2j * np.pi * f * (1 - n_e) * L / c)) / (1 - n_e)
     term2 = np.exp(-4j * np.pi * f * L / c) * (1 - np.exp(2j * np.pi * f * (1 + n_e) * L / c)) / (1 + n_e)

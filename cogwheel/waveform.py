@@ -9,7 +9,7 @@ import lalsimulation
 from cogwheel import gw_utils
 from cogwheel import utils
 from scipy.interpolate import interp1d
-from cogwheel.frequency_dependent_response import get_antenna_response
+from frequency_dependent_response import get_antenna_response
 
 from cogwheel.gw_utils import get_geocenter_delays, tgps_to_gmst
 from cogwheel.skyloc_angles import ra_to_lon
@@ -840,8 +840,12 @@ class WaveformGenerator(utils.JSONMixin):
         
     
         # Compute hp for finer and coarse frequency segments
-        hp_finer = self.get_hplus_hcross(f_finer, par_dic, by_m)[0, :]
-        hp_coarse = self.get_hplus_hcross(f_coarse, par_dic, by_m)[0, :]
+        if not by_m:
+            hp_finer = self.get_hplus_hcross(f_finer, par_dic, by_m)[0, :]
+            hp_coarse = self.get_hplus_hcross(f_coarse, par_dic, by_m)[0, :]
+        else:
+            hp_finer = self.get_hplus_hcross(f_finer, par_dic, by_m)[0, 0, :]
+            hp_coarse = self.get_hplus_hcross(f_coarse, par_dic, by_m)[0, 0, :]
     
         # Create interpolation functions for both segments
         t_interp_finer = generate_interpolation_function(hp_finer, f_finer)
