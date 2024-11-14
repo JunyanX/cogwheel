@@ -68,7 +68,9 @@ class CBCLikelihood(utils.JSONMixin):
     asd-drift correction.
     Subclassed by ``RelativeBinningLikelihood``.
     """
-    def __init__(self, event_data, waveform_generator):
+    def __init__(self, event_data, waveform_generator,
+                 vary_polarization=False, doppler=False,
+                 use_cached=False):
         """
         Parameters
         ----------
@@ -84,6 +86,9 @@ class CBCLikelihood(utils.JSONMixin):
 
         self.event_data = event_data
         self.waveform_generator = waveform_generator
+        self.vary_polarization = vary_polarization
+        self.doppler = doppler
+        self.use_cached = use_cached
 
         self.asd_drift = None
 
@@ -297,7 +302,9 @@ class CBCLikelihood(utils.JSONMixin):
         h_f[..., self.event_data.fslice] \
             = self.waveform_generator.get_strain_at_detectors(
                 self.event_data.frequencies[self.event_data.fslice], par_dic,
-                by_m)
+                by_m, vary_polarization=self.vary_polarization,
+                doppler=self.doppler, use_cached=self.use_cached)
+        
         if normalize:
             h_f /= np.sqrt(self._compute_h_h(h_f))[..., np.newaxis]
         return h_f
