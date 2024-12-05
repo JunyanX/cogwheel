@@ -40,7 +40,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
                  vary_polarization=False, doppler=False,
-                 use_cached=False):
+                 use_cached=False, max_time_shift=None):
         """
         Parameters
         ----------
@@ -78,6 +78,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         self.vary_polarization = vary_polarization
         self.doppler = doppler
         self.use_cached = use_cached
+        self.max_time_shift = max_time_shift
 
         # Backward compatibility fix, shouldn't happen in new code:
         if ({'s1x_n', 's1y_n', 's2x_n', 's2y_n'}.isdisjoint(par_dic_0.keys())
@@ -105,6 +106,55 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         it to compute the summary data.
         """
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
+
+    @property
+    def max_time_shift(self):
+        return self._max_time_shift
+
+    
+    @max_time_shift.setter
+    def max_time_shift(self, max_time_shift):
+        self._max_time_shift = max_time_shift
+        
+        if getattr(self, "_pn_phase_tol", None) is not None:
+            self.pn_phase_tol = self._pn_phase_tol  # Trigger recalculation
+        
+    
+
+    def refine_bins_by_time(self, f):
+        """
+        Refine frequency bins to ensure the time span of each bin does not exceed max_time_shift.
+    
+        Parameters
+        ----------
+        f : 1D array
+            Frequency array (edges of the frequency bins).
+    
+        Returns
+        -------
+        refined_f : 1D array
+            New frequency array with adjusted bin edges to satisfy the time span constraint.
+        """
+    
+        ts = self.waveform_generator.time_series(f, self.par_dic_0)
+        refined_f = [f[0]]  # Start with the first frequency edge
+    
+        for i in range(1, len(f)):
+            # Calculate the time span for the current bin
+            t_start = ts[i - 1]
+            t_end = ts[i]
+            time_span = t_end - t_start
+    
+            if time_span > self.max_time_shift:
+                # Subdivide the bin
+                num_sub_bins = int(np.ceil(time_span / self.max_time_shift))
+                sub_bins = np.linspace(f[i - 1], f[i], num=num_sub_bins + 1)
+                refined_f.extend(sub_bins[1:])
+            else:
+                refined_f.append(f[i])
+    
+        return np.array(refined_f)
+
 
     @property
     def pn_phase_tol(self):
@@ -138,7 +188,12 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         # Construct frequency bins
         nbin = np.ceil(diff_phase[-1] / pn_phase_tol).astype(int)
         diff_phase_arr = np.linspace(0, diff_phase[-1], nbin + 1)
-        self.fbin = np.interp(diff_phase_arr, diff_phase, f_arr)
+        fbin = np.interp(diff_phase_arr, diff_phase, f_arr)
+        
+        if self.max_time_shift is not None:
+            self.fbin = self.refine_bins_by_time(fbin)
+        else:
+            self.fbin = fbin
         self._pn_phase_tol = pn_phase_tol
 
     @property
@@ -494,6 +549,8 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         self._h_h_weights = None  # Set by _set_summary()
 
         super().__init__(*args, **kwargs)
+        
+        
 
     @check_bounds
     def lnlike_and_metadata(self, par_dic):
