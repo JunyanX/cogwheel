@@ -368,6 +368,92 @@ def generate_interpolation_function(hp, frequencies):
 
     return interp_func_hp
 
+def generate_phase_derivative_fgrid(f_low, f_high, M = 25, phase_tol=0.01):
+        """
+        Generate adaptive frequency grid using phase derivative approximation.
+        Phase model: Φ(F) = Φ_c - (1/16)(πMF)^(-5/3)
+        Frequency step controlled by |dΦ/dF| * ΔF ≤ phase_tol
+        
+        Parameters:
+            f_low (float): Lower frequency bound in Hz
+            f_high (float): Upper frequency bound in Hz
+            M (float): Chirp mass in solar masses
+            phase_tol (float): Maximum allowed phase difference between adjacent points (radians)
+        
+        Returns:
+            np.ndarray: Adaptively spaced frequency grid (ascending order)
+        """
+        # Convert mass to geometric units (seconds)
+        M_sec = M * 4.925e-6  # 1 solar mass = ~4.925e-6 seconds
+        
+        # Precompute derivative coefficient: dΦ/dF = (5/48)(πM)^(-5/3) * F^(-8/3)
+        deriv_coeff = (5/48) * (np.pi * M_sec)**(-5/3)
+        
+        # Initialize grid with dynamic array allocation
+        f_grid = [f_low]
+        current_f = f_low
+        
+        while current_f < f_high:
+            # Calculate maximum allowed frequency step
+            delta_f = phase_tol / (deriv_coeff * current_f**(-8/3))
+            
+            # Apply frequency step
+            next_f = current_f + delta_f
+            
+            # Handle upper boundary condition
+            if next_f > f_high:
+                f_grid.append(f_high)
+                break
+            
+            f_grid.append(next_f)
+            current_f = next_f
+        
+        return np.array(f_grid, dtype=np.float64)
+
+def sample_time_series_indices(time_series, dt):
+    """
+    Given a sorted time series and a minimum time shift dt, return the indices
+    of time_series such that each subsequent time is at least dt greater than
+    the previous selected time.
+
+    Parameters
+    ----------
+    time_series : array-like
+        Sorted array of time stamps.
+    dt : float
+        Minimum required time difference between successive selected times.
+
+    Returns
+    -------
+    indices : ndarray
+        Array of indices from time_series that satisfy the spacing condition.
+    """
+    indices = []
+    n = len(time_series)
+    
+    current_index = 0
+    indices.append(current_index)
+    
+    # Loop until we reach the end of the time_series
+    while current_index < n:
+        # Define the target time that must be exceeded
+        target_time = time_series[current_index] + dt
+        
+        # Use np.searchsorted to perform binary search for target_time
+        next_index = np.searchsorted(time_series, target_time, side='left')
+        
+        # If no further index satisfies the condition, break out
+        if next_index >= n:
+            indices.append(n-1)
+            break
+        
+        # Append the found index and update current_index
+        indices.append(next_index)
+        current_index = next_index
+    
+    return np.array(indices)
+
+
 
 class WaveformGenerator(utils.JSONMixin):
     """
@@ -524,8 +610,9 @@ class WaveformGenerator(utils.JSONMixin):
         return map(list, zip(*itertools.combinations_with_replacement(
             range(len(self._harmonic_modes_by_m)), 2)))
 
-    def get_strain_at_detectors(self, f, par_dic, by_m=False, vary_polarization=False, doppler=False, f_lower=2,
-                                f_higher=10, use_cached=False):
+    def get_strain_at_detectors(self, f, par_dic, by_m=False, 
+                                vary_polarization=False, doppler=False, 
+                                use_cached=False, dt=None):
         """
         Get strain measurable at detectors with time-dependent antenna response.
     
@@ -535,7 +622,12 @@ class WaveformGenerator(utils.JSONMixin):
         par_dic: parameter dictionary per `WaveformGenerator.params`.
         by_m: bool, whether to return waveform separated by `m`
               harmonic mode (summed over `l`), or already summed.
-        time_varying: bool, whether to account for time-varying antenna response.
+        vary_polarization: bool, whether to account for time-varying 
+                           antenna response.
+        doppler: bool, whether to account for doppler effect
+        use_cached: bool, whether to use cahced time-frequency 
+                    mapping and antenna response
+        dt: float, mimimin time shift of antenna response
     
         Return
         ------
@@ -546,60 +638,86 @@ class WaveformGenerator(utils.JSONMixin):
         # shape: (n_m?, 2, n_detectors, n_frequencies)
         hplus_hcross_at_detectors = self.get_hplus_hcross_at_detectors(f, par_dic, by_m, doppler)
         n_detectors = len(self.detector_names)
-
+    
         if vary_polarization or doppler:
             if self._cached_t is None or not use_cached:
-                self._cached_t = self.time_series(f, par_dic, by_m, f_lower, f_higher)
-
+                self._cached_t = self.time_series(f, par_dic, by_m)
     
         if vary_polarization:
-
-            ts = self._cached_t
-
-            
             if self._cached_fp_fc is None or not use_cached:
-                n_m = hplus_hcross_at_detectors.shape[0]
-                fplus_fcross = self.compute_fplus_fcross(f, par_dic['ra'], par_dic['dec'], par_dic['psi'])
+                if dt:
+                    idx = sample_time_series_indices(self._cached_t, dt)
+                    fplus_fcross_coarse = self.compute_fplus_fcross(
+                        f[idx], par_dic['ra'], par_dic['dec'], par_dic['psi'], idx)
+                    func = interp1d(self._cached_t[idx], fplus_fcross_coarse)
+                    fplus_fcross = func(self._cached_t)
+                else:
+                    fplus_fcross = self.compute_fplus_fcross(
+                        f, par_dic['ra'], par_dic['dec'], par_dic['psi'])
                 self._cached_fp_fc = fplus_fcross
-
             else:
                 fplus_fcross = self._cached_fp_fc
-
-                
+    
             strain = np.einsum('...pdf, ...pdf -> ...df', fplus_fcross, hplus_hcross_at_detectors)
-    
-    
             return strain
-    
     
         # fplus_fcross shape: (2, n_detectors)
         fplus_fcross = gw_utils.fplus_fcross(
             self.detector_names, par_dic['ra'], par_dic['dec'], par_dic['psi'],
             self.tgps)
-
+    
         # Detector strain (n_m?, n_detectors, n_frequencies)
-        return np.einsum('pd, ...pdf -> ...df',
-                         fplus_fcross, hplus_hcross_at_detectors)
+        return np.einsum('pd, ...pdf -> ...df', fplus_fcross, hplus_hcross_at_detectors)
 
-    def compute_fplus_fcross(self, f, ra, dec, psi):
 
+    def compute_fplus_fcross(self, f, ra, dec, psi, idx=None):
+        """
+        Compute the antenna responses (fplus and fcross) for each detector over a set of frequencies.
+        
+        Parameters
+        ----------
+        f : array_like
+            Array of frequencies.
+        ra : float
+            Right ascension.
+        dec : float
+            Declination.
+        psi : float
+            Polarization angle.
+        idx : array_like or None, optional
+            Optional array of indices to extract delta_t from self._cached_t.
+            If provided, len(idx) must equal len(f). If None, the full range is used.
+        
+        Returns
+        -------
+        fplus_fcross : ndarray
+            Array of shape (2, n_detectors, len(f)) containing the antenna responses.
+        """
         n_detectors = len(self.detector_names)
-        fplus_fcross = np.zeros((2, n_detectors, len(f)), dtype = complex)
+        fplus_fcross = np.zeros((2, n_detectors, len(f)), dtype=complex)
+        
+        # If idx is provided, ensure its length matches the frequency array
+        if idx is not None:
+            if len(idx) != len(f):
+                raise ValueError("Length of idx must equal length of frequency array f.")
+        else:
+            # Default: use sequential indices corresponding to the full frequency grid
+            idx = np.arange(len(f))
         
         for d in range(n_detectors):
-        
-            for i, frequency in enumerate(f):
-                delta_t = self._cached_t[i]
+            for j, frequency in enumerate(f):
+                # Use the index from idx to extract the appropriate delta_t
+                index = idx[j]
+                delta_t = self._cached_t[index]
                 gmst = tgps_to_gmst(self.tgps + delta_t)
         
-                # Use the new get_antenna_response function
+                # Compute the antenna responses
                 fplus, fcross = get_antenna_response(frequency, ra, dec, gmst, psi, self.detector_names[d])
+                fplus_fcross[0, d, j] = fplus  # F+ for hp
+                fplus_fcross[1, d, j] = fcross  # Fx for hc
         
-                # Assign the antenna responses
-                fplus_fcross[0, d, i] = fplus # F+ for hp
-                fplus_fcross[1, d, i] = fcross # Fx for hc
-    
         return fplus_fcross
+
 
 
 
@@ -772,48 +890,10 @@ class WaveformGenerator(utils.JSONMixin):
 
         return False
 
-    def get_f_finer(self, f, delta_f_finer=1/2**18, delta_f_coarse=1/2**10):
-        """
-        Generate finer and coarser frequency grids based on the input frequency range.
-    
-        Parameters
-        ----------
-        f : array-like
-            Input frequency array.
-        delta_f_finer : float, optional
-            Frequency step for finer grid, by default 1/2**18.
-        delta_f_coarse : float, optional
-            Frequency step for coarse grid, by default 1/2**10.
-    
-        Returns
-        -------
-        f_finer : numpy array
-            Finer frequency grid array.
-        f_coarse : numpy array
-            Coarser frequency grid array.
-        """
-        f_min = np.min(f)
-        f_max = np.max(f)
-        mean_delta_f = np.mean(np.diff(f))
-    
-        # Determine f_finer and f_coarse based on mean_delta_f
-        if mean_delta_f <= delta_f_finer:
-            f_finer = f
-            f_coarse = f
-            
-        elif mean_delta_f <= delta_f_coarse:
-            f_finer = np.arange(f_min, f_max, delta_f_finer)
-            f_coarse = f
-            
-        else:
-            f_finer = np.arange(f_min, f_max, delta_f_finer)
-            f_coarse = np.arange(f_min, f_max, delta_f_coarse)
-    
-        return f_finer, f_coarse
 
 
 
-    def time_series(self, f, par_dic, by_m=False, f_lower=2, f_higher=10):
+    def time_series(self, f, par_dic, by_m=False):
         """
         Generate the full time series based on the given frequency array, using 
         finer frequencies at lower frequencies and coarse frequencies at higher frequencies.
@@ -826,43 +906,31 @@ class WaveformGenerator(utils.JSONMixin):
             Dictionary of parameters.
         by_m : bool, optional
             Whether to return waveform separated by m harmonic mode, by default False.
-        f_lower : float, optional
-            Lower threshold of frequency, by default 2.
-        f_higher : float, optional
-            Higher threshold of frequency, by default 10.
-    
+            
         Returns
         -------
-        t_full : array-like
+        time_series : array-like
             Full time series array.
         """
-        # Generate finer frequency grid within [f_lower, f_higher]
-        f_finer, f_coarse = self.get_f_finer(f)
-        f_finer = f_finer[(f_finer >= f_lower) & (f_finer <= f_higher)]
-        f_coarse = f_coarse[f_coarse >= f_higher]
+        
+        f_grid = generate_phase_derivative_fgrid(np.min(f), np.max(f), )
         
     
         # Compute hp for finer and coarse frequency segments
         if not by_m:
-            hp_finer = self.get_hplus_hcross(f_finer, par_dic, by_m)[0, :]
-            hp_coarse = self.get_hplus_hcross(f_coarse, par_dic, by_m)[0, :]
+            hp = self.get_hplus_hcross(f_grid, par_dic, by_m)[0, :]
         else:
-            hp_finer = self.get_hplus_hcross(f_finer, par_dic, by_m)[0, 0, :]
-            hp_coarse = self.get_hplus_hcross(f_coarse, par_dic, by_m)[0, 0, :]
+            hp = self.get_hplus_hcross(f_grid, par_dic, by_m)[0, 0, :]
     
         # Create interpolation functions for both segments
-        t_interp_finer = generate_interpolation_function(hp_finer, f_finer)
-        t_interp_coarse = generate_interpolation_function(hp_coarse, f_coarse)
+        t_interp = generate_interpolation_function(hp, f_grid)
     
         # Initialize the time series array
         time_series = np.zeros_like(f)
     
         # Populate time_series using the two interpolation functions
         for i, freq in enumerate(f):
-            if f_lower <= freq <= f_higher:
-                time_series[i] = t_interp_finer(freq)
-            elif freq > f_higher:
-                time_series[i] = t_interp_coarse(freq)
+            time_series[i] = t_interp(freq)
     
         return time_series
 

@@ -37,7 +37,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
                    pn_phase_tol=.02, spline_degree=3,
-                   time_range=(-.25, .25), mchirp_range=None, f_ref=None):
+                   time_range=(-.25, .25), mchirp_range=None, f_ref=None,
+                   vary_polarization=False, doppler=False, use_cached=False,
+                   dt=None):
         """
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
@@ -99,7 +101,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                                     par_dic_0, pn_phase_tol=pn_phase_tol,
                                     spline_degree=spline_degree,
                                     time_range=time_range,
-                                    mchirp_range=mchirp_range)
+                                    mchirp_range=mchirp_range,
+                                    vary_polarization=vary_polarization,
+                                    doppler=doppler,
+                                    use_cached=use_cached,
+                                    dt=dt)
 
                 # Check that the relative binning is accurate at the injection.
                 # If not, will go on to attempt the usual maximization.
@@ -146,7 +152,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
-                 time_range=(-.25, .25), mchirp_range=None):
+                 time_range=(-.25, .25), mchirp_range=None, 
+                 vary_polarization=False, doppler=False, use_cached=False,
+                 dt=None):
         """
         Parameters
         ----------
@@ -179,6 +187,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         self._time_range = time_range
         self._mchirp_range = mchirp_range
+        self.vary_polarization = vary_polarization
+        self.doppler = doppler
+        self.use_cached = use_cached
+        self.dt = dt
 
         waveform_generator.n_cached_waveforms = max(
             2, waveform_generator.n_cached_waveforms)  # Will need to flip iota
@@ -280,7 +292,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         the number of timeshifts for which summary data were computed.
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, par_dic, by_m=True)
+            self.fbin, par_dic, by_m=True, vary_polarization=self.vary_polarization,
+            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
 
         # Sum over m and f axes, leave time and detector axis unsummed.
         d_h_timeseries = (self._d_h_timeseries_weights * h_fbin.conj()
@@ -317,7 +330,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         and phase is applied to all detectors).
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, par_dic, by_m=True)
+            self.fbin, par_dic, by_m=True, vary_polarization=self.vary_polarization,
+            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
 
         det_slice = np.s_[:, det_inds, :]
         d_h = (self._d_h_weights * h_fbin.conj())[det_slice].sum()

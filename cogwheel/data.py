@@ -434,7 +434,7 @@ class EventData(utils.JSONMixin):
 
         return rfftfreq_down, data_fd_down, wht_filter, tcoarse
 
-    def inject_signal(self, par_dic, approximant):
+    def inject_signal(self, par_dic, approximant, kwargs=None):
         """
         Add a signal to the data.
 
@@ -453,6 +453,7 @@ class EventData(utils.JSONMixin):
         approximant: str
             Name of approximant.
         """
+        kwargs = kwargs or {}
         if self.injection:
             logging.warning(
                 'Injecting another signal in addition to a previous injection.'
@@ -463,7 +464,7 @@ class EventData(utils.JSONMixin):
             self, approximant)
         h_f = np.zeros_like(self.strain)
         h_f[:, self.fslice] = waveform_generator.get_strain_at_detectors(
-            self.frequencies[self.fslice], par_dic)
+            self.frequencies[self.fslice], par_dic, **kwargs)
         self._set_strain(self.strain + h_f)
 
         h_h = 4 * self.df * np.linalg.norm(h_f * self.wht_filter, axis=-1)**2
