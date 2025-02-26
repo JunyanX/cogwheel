@@ -68,17 +68,16 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         if (fbin is None) == (pn_phase_tol is None):
             raise ValueError('Pass exactly one of `fbin` or `pn_phase_tol`.')
 
-        super().__init__(event_data, waveform_generator)
+        super().__init__(event_data, waveform_generator, 
+                         vary_polarization=vary_polarization, 
+                         doppler=doppler, 
+                         use_cached=use_cached, 
+                         dt=dt)
 
         self._coefficients = None  # Set by ``._set_splines``
         self._basis_splines = None  # Set by ``._set_splines``
 
         self._spline_degree = spline_degree
-
-        self.vary_polarization = vary_polarization
-        self.doppler = doppler
-        self.use_cached = use_cached
-        self.dt = dt
 
         # Backward compatibility fix, shouldn't happen in new code:
         if ({'s1x_n', 's1y_n', 's2x_n', 's2y_n'}.isdisjoint(par_dic_0.keys())
