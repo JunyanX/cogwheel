@@ -565,6 +565,9 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
             {par: par_dic[par]
              for par in self.waveform_generator.polarization_params}
             | self._FIDUCIAL_CONFIGURATION)
+        # d_h shape (n_m, 2, n_det, f?)
+        # h_h shape (n_m, 2, 2, n_det, f?)
+        # with dimension of f only if vary_polarization
         d_h_mpd, h_h_mpd = self._get_dh_hh_by_m_polarization_detector(
             tuple(par_dic_fiducial.items()))
 
@@ -574,15 +577,21 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
 
         # TODO: fplus_fcross for you has a frequency axis too, so it needs to be introduced in self._get_dh_hh_by_m_polarization_detector
-        # fplus_fcross shape: (2, n_detectors)
-        fplus_fcross = gw_utils.fplus_fcross(
-            self.waveform_generator.detector_names,
-            par_dic['ra'], par_dic['dec'], par_dic['psi'],
-            self.waveform_generator.tgps)
+        if self.vary_polarization:
+            # using cached fplus_fcross when computing h0_f
+            # shape (2, n_det, f)
+            fplus_fcross = self.waveform_generator._cached_fp_fc
 
-        d_h = amp_ratio * np.einsum('mpd, pd, m -> mpd',
+        else: 
+            # fplus_fcross shape: (2, n_detectors)
+            fplus_fcross = gw_utils.fplus_fcross(
+                self.waveform_generator.detector_names,
+                par_dic['ra'], par_dic['dec'], par_dic['psi'],
+                self.waveform_generator.tgps)
+
+        d_h = amp_ratio * np.einsum('mpd..., pd..., m -> mpd',
                                     d_h_mpd, fplus_fcross, dh_phasor)
-        h_h = amp_ratio**2 * np.einsum('mpPd, pd, Pd, m -> mpPd',
+        h_h = amp_ratio**2 * np.einsum('mpPd..., pd..., Pd..., m -> mpPd',
                                        h_h_mpd, fplus_fcross,
                                        fplus_fcross, hh_phasor)
         return d_h, h_h
@@ -624,15 +633,29 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
                           'the summary data.')
             self.par_dic_0 = self.par_dic_0  # Recomputes summary
 
-        # Shape (n_m, 2, n_detectors), complex
-        d_h = np.einsum('mdf, mpdf -> mpd',
-                        self._d_h_weights, hplus_hcross_at_detectors.conj())
+        if self.vary_polarization:
+            # preserve the dimension of f
+            # Shape (n_m, 2, n_detectors, f), complex
+            d_h = np.einsum('mdf, mpdf -> mpdf',
+            self._d_h_weights, hplus_hcross_at_detectors.conj())
 
-        # Shape (n_m, 2, 2, n_detectors), complex
-        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-        h_h = np.einsum('mdf, mpdf, mPdf -> mpPd', self._h_h_weights,
-                        hplus_hcross_at_detectors[m_inds],
-                        hplus_hcross_at_detectors.conj()[mprime_inds])
+            # Shape (n_m, 2, 2, n_detectors), complex
+            m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
+            h_h = np.einsum('mdf, mpdf, mPdf -> mpPdf', self._h_h_weights,
+                            hplus_hcross_at_detectors[m_inds],
+                            hplus_hcross_at_detectors.conj()[mprime_inds])
+
+        else: 
+            # Shape (n_m, 2, n_detectors), complex
+            d_h = np.einsum('mdf, mpdf -> mpd',
+                            self._d_h_weights, hplus_hcross_at_detectors.conj())
+    
+            # Shape (n_m, 2, 2, n_detectors), complex
+            m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
+            h_h = np.einsum('mdf, mpdf, mPdf -> mpPd', self._h_h_weights,
+                            hplus_hcross_at_detectors[m_inds],
+                            hplus_hcross_at_detectors.conj()[mprime_inds])
+            
         return d_h, h_h
 
     def _set_summary(self):
@@ -657,11 +680,10 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
                                                  disable_precession=False):
 
             # TODO: Pass vary polarization etc to _get_h_f, else summary data isn't correct. fixed 
-            self._h0_f = self._get_h_f(self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
-                                       doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
             self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
-                self.fbin, self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
-                doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)  # n_m x ndet x len(fbin)
+                            self.fbin, self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
+                            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)  # n_m x ndet x len(fbin)
+            self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
 
             # Temporarily undo big time shift so waveform is smooth at
             # high frequencies:
