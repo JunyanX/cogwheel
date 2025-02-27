@@ -497,6 +497,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         self._h0_fbin = None  # Set by _set_summary()
         self._d_h_weights = None  # Set by _set_summary()
         self._h_h_weights = None  # Set by _set_summary()
+        self._cached_fp_fc_bin = None # Set by _set_summary()
 
         super().__init__(*args, **kwargs)
         
@@ -579,7 +580,13 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         if self.vary_polarization:
             # using cached fplus_fcross when computing h0_f
             # shape (2, n_det, f)
-            fplus_fcross = self.waveform_generator._cached_fp_fc
+            fplus_fcross = self._cached_fp_fc_bin
+            
+            d_h = amp_ratio * np.einsum('mpdf, pdf, m -> mpd',
+                                        d_h_mpd, fplus_fcross, dh_phasor)
+            h_h = amp_ratio**2 * np.einsum('mpPdf, pdf, Pdf, m -> mpPd',
+                                           h_h_mpd, fplus_fcross,
+                                           fplus_fcross, hh_phasor)
 
         else: 
             # fplus_fcross shape: (2, n_detectors)
@@ -587,12 +594,13 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
                 self.waveform_generator.detector_names,
                 par_dic['ra'], par_dic['dec'], par_dic['psi'],
                 self.waveform_generator.tgps)
-
-        d_h = amp_ratio * np.einsum('mpd..., pd..., m -> mpd',
-                                    d_h_mpd, fplus_fcross, dh_phasor)
-        h_h = amp_ratio**2 * np.einsum('mpPd..., pd..., Pd..., m -> mpPd',
-                                       h_h_mpd, fplus_fcross,
-                                       fplus_fcross, hh_phasor)
+            
+            d_h = amp_ratio * np.einsum('mpd, pd, m -> mpd',
+                                        d_h_mpd, fplus_fcross, dh_phasor)
+            h_h = amp_ratio**2 * np.einsum('mpPd, pd, Pd, m -> mpPd',
+                                           h_h_mpd, fplus_fcross,
+                                           fplus_fcross, hh_phasor)
+            
         return d_h, h_h
 
     @utils.lru_cache(maxsize=16)
@@ -679,10 +687,12 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
                                                  disable_precession=False):
 
             # TODO: Pass vary polarization etc to _get_h_f, else summary data isn't correct. fixed 
+            self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
             self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
                             self.fbin, self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
                             doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)  # n_m x ndet x len(fbin)
-            self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
+            self._cached_fp_fc_bin = self.waveform_generator._cached_fp_fc
+
 
             # Temporarily undo big time shift so waveform is smooth at
             # high frequencies:

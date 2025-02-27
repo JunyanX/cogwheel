@@ -638,10 +638,17 @@ class WaveformGenerator(utils.JSONMixin):
         # shape: (n_m?, 2, n_detectors, n_frequencies)
         hplus_hcross_at_detectors = self.get_hplus_hcross_at_detectors(f, par_dic, by_m, doppler)
         n_detectors = len(self.detector_names)
-    
+
+        
+        if self._cached_t is not None:
+            if len(f) != len(self._cached_t):
+                self._cached_t = None
+                self._cached_fp_fc = None
+
         if vary_polarization or doppler:
             if self._cached_t is None or not use_cached:
                 self._cached_t = self.time_series(f, par_dic, by_m)
+
     
         if vary_polarization:
             if self._cached_fp_fc is None or not use_cached:
@@ -749,8 +756,6 @@ class WaveformGenerator(utils.JSONMixin):
         if not np.array_equal(f, self._cached_f):
             self._get_shifts.cache_clear()
             self._cached_f = f
-            self._cached_t = None
-            self._cached_fp_fc = None
 
             
         shifts = self._get_shifts(par_dic['ra'], par_dic['dec'], par_dic['t_geocenter'], doppler)
