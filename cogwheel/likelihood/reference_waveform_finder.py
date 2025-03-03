@@ -194,8 +194,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         waveform_generator.n_cached_waveforms = max(
             2, waveform_generator.n_cached_waveforms)  # Will need to flip iota
+        # TODO: Pass the vary_polarization etc to the rbl instantiation
         super().__init__(event_data, waveform_generator, par_dic_0,
-                         fbin, pn_phase_tol, spline_degree)
+                         fbin, pn_phase_tol, spline_degree, vary_polarization=self.vary_polarization,
+                         doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
 
     @property
     def time_range(self):
