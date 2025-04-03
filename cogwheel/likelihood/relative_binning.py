@@ -40,7 +40,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
                  vary_polarization=False, doppler=False,
-                 use_cached=False, dt=None):
+                 use_cached=False, dt=None, detector_size=False):
         """
         Parameters
         ----------
@@ -72,7 +72,8 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
                          vary_polarization=vary_polarization, 
                          doppler=doppler, 
                          use_cached=use_cached, 
-                         dt=dt)
+                         dt=dt,
+                         detector_size=detector_size)
 
         self._coefficients = None  # Set by ``._set_splines``
         self._basis_splines = None  # Set by ``._set_splines``
@@ -576,7 +577,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         dh_phasor = np.exp(-1j * dphi * m_arr)
         hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
 
-        # TODO: fplus_fcross for you has a frequency axis too, so it needs to be introduced in self._get_dh_hh_by_m_polarization_detector
+        # TODO: fplus_fcross for you has a frequency axis too, so it needs to be introduced in     self._get_dh_hh_by_m_polarization_detector
         if self.vary_polarization:
             # using cached fplus_fcross when computing h0_f
             # shape (2, n_det, f)
@@ -688,10 +689,15 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
             # TODO: Pass vary polarization etc to _get_h_f, else summary data isn't correct. fixed 
             self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
+            idx = np.searchsorted(self.event_data.frequencies[self.event_data.fslice], self.fbin)
+            if self.vary_polarization:
+                self._cached_fp_fc_bin = self.waveform_generator._cached_fp_fc[:,:,idx]
+            
             self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
                             self.fbin, self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
-                            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)  # n_m x ndet x len(fbin)
-            self._cached_fp_fc_bin = self.waveform_generator._cached_fp_fc
+                            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt,
+                            detector_size=self.detector_size)  # n_m x ndet x len(fbin)
+
 
 
             # Temporarily undo big time shift so waveform is smooth at

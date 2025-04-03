@@ -116,7 +116,7 @@ def D_scalar(f, n_e, L):
     return (c / (8 * np.pi * 1j * f * L)) * (term1 - term2)
 
 
-def get_frequency_dependent_detector_tensor(detector_name, ra, dec, gmst, f, L=4000):
+def get_frequency_dependent_detector_tensor(detector_name, ra, dec, gmst, f, L=4000, detector_size=False):
     """
     Calculate the frequency-dependent detector tensor.
     
@@ -148,14 +148,19 @@ def get_frequency_dependent_detector_tensor(detector_name, ra, dec, gmst, f, L=4
     
     # Retrieve the arm directions for the given detector
     u, v = DETECTOR_ARMS[detector_name]
+
     
     # Calculate n_e as the dot product of n with arm directions
     n_e_u = np.dot(n, u)
     n_e_v = np.dot(n, v)
-    
-    # Calculate the frequency-dependent detector scalars
-    D_u = D_scalar(f, n_e_u, L)
-    D_v = D_scalar(f, n_e_v, L)
+
+    if detector_size:
+        # Calculate the frequency-dependent detector scalars
+        D_u = D_scalar(f, n_e_u, L)
+        D_v = D_scalar(f, n_e_v, L)
+    else:
+        D_u = 1/2
+        D_v = 1/2
     
     # Calculate the detector tensor
     D_f = D_u * np.outer(u, u) - D_v * np.outer(v, v)
@@ -165,7 +170,7 @@ def get_frequency_dependent_detector_tensor(detector_name, ra, dec, gmst, f, L=4
 
 
 
-def get_antenna_response(f, ra, dec, gmst, psi, detector_name, L=4000):
+def get_antenna_response(f, ra, dec, gmst, psi, detector_name, L=4000, detector_size=False):
     """
     Calculate the frequency-dependent antenna response.
     
@@ -197,7 +202,7 @@ def get_antenna_response(f, ra, dec, gmst, psi, detector_name, L=4000):
     epsilon_plus, epsilon_cross = get_polarization_tensor1(ra, dec, gmst, psi)
     
     # Get the frequency-dependent detector tensor
-    D_f = get_frequency_dependent_detector_tensor(detector_name, ra, dec, gmst, f, L)
+    D_f = get_frequency_dependent_detector_tensor(detector_name, ra, dec, gmst, f, L, detector_size)
     
     # Calculate the antenna response for plus and cross polarizations
     F_plus = np.tensordot(epsilon_plus, D_f, axes=2)

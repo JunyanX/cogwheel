@@ -612,7 +612,7 @@ class WaveformGenerator(utils.JSONMixin):
 
     def get_strain_at_detectors(self, f, par_dic, by_m=False, 
                                 vary_polarization=False, doppler=False, 
-                                use_cached=False, dt=None):
+                                use_cached=False, dt=None, detector_size=False):
         """
         Get strain measurable at detectors with time-dependent antenna response.
     
@@ -655,12 +655,13 @@ class WaveformGenerator(utils.JSONMixin):
                 if dt:
                     idx = sample_time_series_indices(self._cached_t, dt)
                     fplus_fcross_coarse = self.compute_fplus_fcross(
-                        f[idx], par_dic['ra'], par_dic['dec'], par_dic['psi'], idx)
+                        f[idx], par_dic['ra'], par_dic['dec'], par_dic['psi'], 
+                        detector_size, idx)
                     func = interp1d(self._cached_t[idx], fplus_fcross_coarse)
                     fplus_fcross = func(self._cached_t)
                 else:
                     fplus_fcross = self.compute_fplus_fcross(
-                        f, par_dic['ra'], par_dic['dec'], par_dic['psi'])
+                        f, par_dic['ra'], par_dic['dec'], par_dic['psi'], detector_size)
                 self._cached_fp_fc = fplus_fcross
             else:
                 fplus_fcross = self._cached_fp_fc
@@ -677,7 +678,7 @@ class WaveformGenerator(utils.JSONMixin):
         return np.einsum('pd, ...pdf -> ...df', fplus_fcross, hplus_hcross_at_detectors)
 
 
-    def compute_fplus_fcross(self, f, ra, dec, psi, idx=None):
+    def compute_fplus_fcross(self, f, ra, dec, psi, detector_size, idx=None):
         """
         Compute the antenna responses (fplus and fcross) for each detector over a set of frequencies.
         
@@ -719,7 +720,8 @@ class WaveformGenerator(utils.JSONMixin):
                 gmst = tgps_to_gmst(self.tgps + delta_t)
         
                 # Compute the antenna responses
-                fplus, fcross = get_antenna_response(frequency, ra, dec, gmst, psi, self.detector_names[d])
+                fplus, fcross = get_antenna_response(frequency, ra, dec, gmst, psi,
+                                                     self.detector_names[d], detector_size=detector_size)
                 fplus_fcross[0, d, j] = fplus  # F+ for hp
                 fplus_fcross[1, d, j] = fcross  # Fx for hc
         

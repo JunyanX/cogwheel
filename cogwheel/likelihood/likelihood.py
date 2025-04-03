@@ -70,7 +70,7 @@ class CBCLikelihood(utils.JSONMixin):
     """
     def __init__(self, event_data, waveform_generator,
                  vary_polarization=False, doppler=False,
-                 use_cached=False, dt=None):
+                 use_cached=False, dt=None, detector_size=False):
         """
         Parameters
         ----------
@@ -90,6 +90,7 @@ class CBCLikelihood(utils.JSONMixin):
         self.doppler = doppler
         self.use_cached = use_cached
         self.dt = dt
+        self.detector_size = detector_size
 
         self.asd_drift = None
 
@@ -305,7 +306,7 @@ class CBCLikelihood(utils.JSONMixin):
                 self.event_data.frequencies[self.event_data.fslice], par_dic,
                 by_m, vary_polarization=self.vary_polarization,
                 doppler=self.doppler, use_cached=self.use_cached,
-                dt=self.dt)
+                dt=self.dt, detector_size=self.detector_size)
         
         if normalize:
             h_f /= np.sqrt(self._compute_h_h(h_f))[..., np.newaxis]

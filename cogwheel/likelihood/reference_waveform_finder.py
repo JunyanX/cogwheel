@@ -154,7 +154,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                  fbin=None, pn_phase_tol=None, spline_degree=3,
                  time_range=(-.25, .25), mchirp_range=None, 
                  vary_polarization=False, doppler=False, use_cached=False,
-                 dt=None):
+                 dt=None, detector_size=False):
         """
         Parameters
         ----------
@@ -191,6 +191,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.doppler = doppler
         self.use_cached = use_cached
         self.dt = dt
+        self.detector_size = detector_size
 
         waveform_generator.n_cached_waveforms = max(
             2, waveform_generator.n_cached_waveforms)  # Will need to flip iota
@@ -295,7 +296,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True, vary_polarization=self.vary_polarization,
-            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
+            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt,
+            detector_size=self.detector_size)
 
         # Sum over m and f axes, leave time and detector axis unsummed.
         d_h_timeseries = (self._d_h_timeseries_weights * h_fbin.conj()
@@ -333,7 +335,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True, vary_polarization=self.vary_polarization,
-            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
+            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt,
+            detector_size=self.detector_size)
 
         det_slice = np.s_[:, det_inds, :]
         d_h = (self._d_h_weights * h_fbin.conj())[det_slice].sum()
