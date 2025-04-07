@@ -135,7 +135,13 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                             pn_phase_tol=pn_phase_tol,
                             spline_degree=spline_degree,
                             time_range=time_range,
-                            mchirp_range=mchirp_range)
+                            mchirp_range=mchirp_range,
+                            vary_polarization=vary_polarization,
+                            doppler=doppler,
+                            use_cached=use_cached,
+                            dt=dt,
+                            df=df,
+                            detector_size=detector_size)
         ref_wf_finder.find_bestfit_pars(freeze_f_ref=f_ref is not None)
 
         # If this is an injection, we can "cheat" and check that relative
