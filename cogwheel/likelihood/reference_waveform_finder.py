@@ -39,7 +39,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                    pn_phase_tol=.02, spline_degree=3,
                    time_range=(-.25, .25), mchirp_range=None, f_ref=None,
                    vary_polarization=False, doppler=False, use_cached=False,
-                   dt=None):
+                   dt=None, df=None, detector_size=False):
         """
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
@@ -105,7 +105,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                                     vary_polarization=vary_polarization,
                                     doppler=doppler,
                                     use_cached=use_cached,
-                                    dt=dt)
+                                    dt=dt,
+                                    df=df,
+                                    detector_size=detector_size)
 
                 # Check that the relative binning is accurate at the injection.
                 # If not, will go on to attempt the usual maximization.
@@ -154,7 +156,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                  fbin=None, pn_phase_tol=None, spline_degree=3,
                  time_range=(-.25, .25), mchirp_range=None, 
                  vary_polarization=False, doppler=False, use_cached=False,
-                 dt=None, detector_size=False):
+                 dt=None, df=None, detector_size=False):
         """
         Parameters
         ----------
@@ -191,6 +193,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.doppler = doppler
         self.use_cached = use_cached
         self.dt = dt
+        self.df = df
         self.detector_size = detector_size
 
         waveform_generator.n_cached_waveforms = max(
@@ -198,7 +201,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # TODO: Pass the vary_polarization etc to the rbl instantiation
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree, vary_polarization=self.vary_polarization,
-                         doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
+                         doppler=self.doppler, use_cached=self.use_cached, dt=self.dt, df=self.df,
+                         detector_size=self.detector_size)
 
     @property
     def time_range(self):
@@ -296,7 +300,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True, vary_polarization=self.vary_polarization,
-            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt,
+            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt, df=self.df,
             detector_size=self.detector_size)
 
         # Sum over m and f axes, leave time and detector axis unsummed.
@@ -335,7 +339,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True, vary_polarization=self.vary_polarization,
-            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt,
+            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt, df=self.df,
             detector_size=self.detector_size)
 
         det_slice = np.s_[:, det_inds, :]

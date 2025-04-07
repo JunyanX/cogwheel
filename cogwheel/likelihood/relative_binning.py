@@ -40,7 +40,8 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
                  vary_polarization=False, doppler=False,
-                 use_cached=False, dt=None, detector_size=False):
+                 use_cached=False, dt=None, df=None, 
+                 detector_size=False):
         """
         Parameters
         ----------
@@ -73,6 +74,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
                          doppler=doppler, 
                          use_cached=use_cached, 
                          dt=dt,
+                         df=df,
                          detector_size=detector_size)
 
         self._coefficients = None  # Set by ``._set_splines``
@@ -577,17 +579,17 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         dh_phasor = np.exp(-1j * dphi * m_arr)
         hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
 
-        # TODO: fplus_fcross for you has a frequency axis too, so it needs to be introduced in     self._get_dh_hh_by_m_polarization_detector
+        # TODO: fplus_fcross for you has a frequency axis too, so it needs to be introduced in self._get_dh_hh_by_m_polarization_detector
         if self.vary_polarization:
             # using cached fplus_fcross when computing h0_f
             # shape (2, n_det, f)
             fplus_fcross = self._cached_fp_fc_bin
             
             d_h = amp_ratio * np.einsum('mpdf, pdf, m -> mpd',
-                                        d_h_mpd, fplus_fcross, dh_phasor)
+                                        d_h_mpd, fplus_fcross.conj(), dh_phasor)
             h_h = amp_ratio**2 * np.einsum('mpPdf, pdf, Pdf, m -> mpPd',
                                            h_h_mpd, fplus_fcross,
-                                           fplus_fcross, hh_phasor)
+                                           fplus_fcross.conj(), hh_phasor)
 
         else: 
             # fplus_fcross shape: (2, n_detectors)
@@ -689,14 +691,13 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
             # TODO: Pass vary polarization etc to _get_h_f, else summary data isn't correct. fixed 
             self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
-            idx = np.searchsorted(self.event_data.frequencies[self.event_data.fslice], self.fbin)
-            if self.vary_polarization:
-                self._cached_fp_fc_bin = self.waveform_generator._cached_fp_fc[:,:,idx]
             
             self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
                             self.fbin, self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
-                            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt,
+                            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt, df=self.df,
                             detector_size=self.detector_size)  # n_m x ndet x len(fbin)
+            
+            self._cached_fp_fc_bin = self.waveform_generator._cached_fp_fc
 
 
 
@@ -717,6 +718,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
             d_h0 = self.event_data.blued_strain * self._h0_f.conj()
             self._d_h_weights = (self._get_summary_weights(d_h0)
                                  / np.conj(self._h0_fbin))
+            #self._d_h_weights[np.logical_not(np.isfinite(self._d_h_weights))] = 0
 
             m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
             h0m_h0mprime = (self._h0_f[m_inds] * self._h0_f[mprime_inds].conj()
@@ -724,6 +726,9 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
             self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
                                  / (self._h0_fbin[m_inds]
                                     * self._h0_fbin[mprime_inds].conj()))
+            # TODO: This biases the results!
+            # self._h_h_weights[np.logical_not(np.isfinite(self._h_h_weights))] = 0
+            
             # Count off-diagonal terms twice:
             self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
@@ -739,7 +744,8 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True, 
             vary_polarization=self.vary_polarization,
-            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt)
+            doppler=self.doppler, use_cached=self.use_cached, dt=self.dt,
+            df=self.df, detector_size=self.detector_size)
 
         ratio = scipy.interpolate.interp1d(
             self.fbin, h_fbin / self._h0_fbin, assume_sorted=True,

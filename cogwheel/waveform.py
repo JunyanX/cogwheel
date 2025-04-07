@@ -428,6 +428,10 @@ def sample_time_series_indices(time_series, dt):
     indices : ndarray
         Array of indices from time_series that satisfy the spacing condition.
     """
+
+    if dt is None:
+        return None
+        
     indices = []
     n = len(time_series)
     
@@ -453,6 +457,33 @@ def sample_time_series_indices(time_series, dt):
     
     return np.array(indices)
 
+def sample_frequency_series_indices(f, df):
+    """
+    Sample indices from a sorted frequency array using a constant frequency step.
+
+    Parameters
+    ----------
+    f : array-like
+        Sorted array of frequencies.
+    df : float or None
+        Desired frequency spacing. If None, no subsampling is performed.
+
+    Returns
+    -------
+    indices : ndarray or None
+        Array of indices corresponding to frequencies sampled every df.
+        Returns None if df is None.
+    """
+    if df is None:
+        return None
+
+    # Create target frequencies from the minimum to (just below) the maximum value
+    target_freqs = np.arange(np.min(f), np.max(f), df)
+    indices = np.searchsorted(f, target_freqs)
+    return indices
+
+
+    
 
 
 class WaveformGenerator(utils.JSONMixin):
@@ -612,7 +643,8 @@ class WaveformGenerator(utils.JSONMixin):
 
     def get_strain_at_detectors(self, f, par_dic, by_m=False, 
                                 vary_polarization=False, doppler=False, 
-                                use_cached=False, dt=None, detector_size=False):
+                                use_cached=False, dt=None, df=None, 
+                                detector_size=False):
         """
         Get strain measurable at detectors with time-dependent antenna response.
     
@@ -627,7 +659,9 @@ class WaveformGenerator(utils.JSONMixin):
         doppler: bool, whether to account for doppler effect
         use_cached: bool, whether to use cahced time-frequency 
                     mapping and antenna response
-        dt: float, mimimin time shift of antenna response
+        dt: float, time spacing of antenna response
+        df: float, frequency spacing of antenna response
+        detector_size: bool, whether to account for detector size effect
     
         Return
         ------
@@ -652,11 +686,13 @@ class WaveformGenerator(utils.JSONMixin):
     
         if vary_polarization:
             if self._cached_fp_fc is None or not use_cached:
-                if dt:
-                    idx = sample_time_series_indices(self._cached_t, dt)
+                if dt or df:
+                    idx_dt = sample_time_series_indices(self._cached_t, dt)
+                    idx_df = sample_frequency_series_indices(f, df)
+                    idx = np.union1d(idx_dt, idx_df)
                     fplus_fcross_coarse = self.compute_fplus_fcross(
-                        f[idx], par_dic['ra'], par_dic['dec'], par_dic['psi'], 
-                        detector_size, idx)
+                    f[idx], par_dic['ra'], par_dic['dec'], par_dic['psi'], 
+                    detector_size, idx)
                     func = interp1d(self._cached_t[idx], fplus_fcross_coarse)
                     fplus_fcross = func(self._cached_t)
                 else:
