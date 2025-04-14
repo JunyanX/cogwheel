@@ -95,7 +95,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             par_dic = event_data.injection['par_dic']
             if waveform.ZERO_INPLANE_SPINS.items() < par_dic.items():
                 # Injection has aligned spins, use it as reference
-                par_dic_0 = cls._get_safe_par_dic(par_dic)
+                if len(waveform_generator.m_arr) > 1:
+                    par_dic_0 = cls._get_safe_par_dic(par_dic)
+                else:
+                    par_dic_0 = par_dic
 
                 ref_wf_finder = cls(event_data, waveform_generator,
                                     par_dic_0, pn_phase_tol=pn_phase_tol,
@@ -108,6 +111,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                                     dt=dt,
                                     df=df,
                                     detector_size=detector_size)
+
+                # If we changed the inclination, find the best distance
+                if par_dic_0['iota'] != par_dic['iota']:
+                    ref_wf_finder._optimize_phase_and_distance()
 
                 # Check that the relative binning is accurate at the injection.
                 # If not, will go on to attempt the usual maximization.
