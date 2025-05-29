@@ -30,7 +30,6 @@ from cogwheel import utils
 from cogwheel import waveform
 from .likelihood import CBCLikelihood, check_bounds
 
-
 class BaseRelativeBinning(CBCLikelihood, ABC):
     """
     Abstract class that implements general relative binning methods.
@@ -77,6 +76,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
                          df=df,
                          detector_size=detector_size)
 
+
         self._coefficients = None  # Set by ``._set_splines``
         self._basis_splines = None  # Set by ``._set_splines``
 
@@ -109,6 +109,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         """
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
         
+        
 
 
 
@@ -130,7 +131,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         if waveform.APPROXIMANTS[self.waveform_generator.approximant].tides:
             pn_exponents.append(5/3)
         pn_exponents = np.array(pn_exponents)
-
+        
         pn_coeff_rng = 2*np.pi / np.abs(np.subtract(
             *self.event_data.fbounds[:, np.newaxis] ** pn_exponents))
 
@@ -145,7 +146,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         nbin = np.ceil(diff_phase[-1] / pn_phase_tol).astype(int)
         diff_phase_arr = np.linspace(0, diff_phase[-1], nbin + 1)
         fbin = np.interp(diff_phase_arr, diff_phase, f_arr)
-        
+
         self.fbin = fbin
         self._pn_phase_tol = pn_phase_tol
 
@@ -692,14 +693,13 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
             # TODO: Pass vary polarization etc to _get_h_f, else summary data isn't correct. fixed 
             self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
             
+            
             self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
                             self.fbin, self.par_dic_0, by_m=True, vary_polarization=self.vary_polarization,
                             doppler=self.doppler, use_cached=self.use_cached, dt=self.dt, df=self.df,
                             detector_size=self.detector_size)  # n_m x ndet x len(fbin)
             
             self._cached_fp_fc_bin = self.waveform_generator._cached_fp_fc
-
-
 
             # Temporarily undo big time shift so waveform is smooth at
             # high frequencies:
@@ -715,10 +715,10 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
             self._h0_f *= shift_f
             self._h0_fbin *= shift_fbin
 
+
             d_h0 = self.event_data.blued_strain * self._h0_f.conj()
             self._d_h_weights = (self._get_summary_weights(d_h0)
                                  / np.conj(self._h0_fbin))
-            #self._d_h_weights[np.logical_not(np.isfinite(self._d_h_weights))] = 0
 
             m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
             h0m_h0mprime = (self._h0_f[m_inds] * self._h0_f[mprime_inds].conj()
@@ -726,11 +726,10 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
             self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
                                  / (self._h0_fbin[m_inds]
                                     * self._h0_fbin[mprime_inds].conj()))
-            # TODO: This biases the results!
-            # self._h_h_weights[np.logical_not(np.isfinite(self._h_h_weights))] = 0
             
             # Count off-diagonal terms twice:
             self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
+            
 
     def _get_h_f_interpolated(self, par_dic, *, normalize=False,
                               by_m=False):

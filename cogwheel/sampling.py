@@ -1,3 +1,4 @@
+
 """Sample posterior distributions."""
 
 import abc

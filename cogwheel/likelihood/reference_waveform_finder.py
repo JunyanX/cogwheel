@@ -18,7 +18,8 @@ from cogwheel.gw_prior.extrinsic import UniformTimePrior
 from cogwheel.skyloc_angles import SkyLocAngles
 from .likelihood import check_bounds
 from .relative_binning import RelativeBinningLikelihood
-
+#debugging
+import time
 
 class ReferenceWaveformFinder(RelativeBinningLikelihood):
     """
@@ -100,6 +101,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 else:
                     par_dic_0 = par_dic
 
+
                 ref_wf_finder = cls(event_data, waveform_generator,
                                     par_dic_0, pn_phase_tol=pn_phase_tol,
                                     spline_degree=spline_degree,
@@ -162,6 +164,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                     'Could not find a good aligned-spin reference waveform:\n'
                     f'Exact (2, 2) mode ln L = {lnl_fft}\n'
                     f'Relative-binning: ln L = {lnl_rb}')
+                
 
         return ref_wf_finder
 
@@ -211,6 +214,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         waveform_generator.n_cached_waveforms = max(
             2, waveform_generator.n_cached_waveforms)  # Will need to flip iota
+        
         # TODO: Pass the vary_polarization etc to the rbl instantiation
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree, vary_polarization=self.vary_polarization,
@@ -371,15 +375,47 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         amp_bf = np.abs(d_h) / h_h
         return lnl, amp_bf, phase_bf
 
-    def _set_summary(self):
-        """Set usual summary data plus ``_d_h_timeseries_weights``."""
+    def _set_summary(self, time_chunked=True, time_chunk_size=32):
+        """Set usual summary data plus `_d_h_timeseries_weights`.
+    
+        Args:
+            time_chunked (bool): if True, break the time‐axis into chunks of length
+                `time_chunk_size` so you never allocate the full (nt,1,3,nf) array at once.
+            time_chunk_size (int): number of time‐samples per chunk.
+        """
         super()._set_summary()
         self._times = np.arange(*self.time_range, 2**-10)
-        shifts = np.exp(2j*np.pi * self._times.reshape(-1, 1, 1, 1)
-                        * self.event_data.frequencies)
-        d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
-        self._d_h_timeseries_weights = (self._get_summary_weights(d_h0_t)
-                                        / np.conj(self._h0_fbin))
+    
+        if time_chunked:
+            weights_chunks = []
+            for start in range(0, len(self._times), time_chunk_size):
+                t_chunk = self._times[start : start + time_chunk_size]  # (chunk,)
+                # build only a small (chunk,1,1,nf) shifts array
+                shifts = np.exp(2j * np.pi * t_chunk[:, None, None, None]
+                                * self.event_data.frequencies)
+                # multiply out a small (chunk,1,3,nf) array
+                d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
+    
+                # compute and store that chunk’s weights (chunk, nmodes, ndet)
+                w_chunk = self._get_summary_weights(d_h0_t) / np.conj(self._h0_fbin)
+                weights_chunks.append(w_chunk)
+    
+                # free temporaries right away
+                del shifts, d_h0_t, w_chunk
+    
+            # stitch back into the full time‐series
+            self._d_h_timeseries_weights = np.concatenate(weights_chunks, axis=0)
+    
+        else:
+            # all-at-once path (original code)
+            shifts = np.exp(2j * np.pi * self._times.reshape(-1, 1, 1, 1)
+                            * self.event_data.frequencies)
+            d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
+            self._d_h_timeseries_weights = (
+                self._get_summary_weights(d_h0_t)
+                / np.conj(self._h0_fbin)
+            )
+
 
     def _updated_intrinsic(self, mchirp, eta, chieff):
         """Return `self.par_dic_0` with updated m1, m2, s1z, s2z."""

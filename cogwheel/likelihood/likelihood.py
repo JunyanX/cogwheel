@@ -325,11 +325,12 @@ class CBCLikelihood(utils.JSONMixin):
     def _compute_d_h(self, h_f):
         """
         Return array of len ndetectors with complex inner product (d|h).
+        
         ASD drift correction is applied. Relative binning is not used.
         """
         return (4 * self.event_data.df * self.asd_drift**-2
                 * np.sum(self.event_data.blued_strain * np.conj(h_f), axis=-1))
-
+    
     def _matched_filter_timeseries(self, normalized_h_f):
         """
         Return (z_cos, z_sin), the matched filter output of a normalized
