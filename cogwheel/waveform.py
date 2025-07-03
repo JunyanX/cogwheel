@@ -936,7 +936,7 @@ class WaveformGenerator(utils.JSONMixin):
 
 
 
-    def time_series(self, f, par_dic, by_m=False):
+    def time_series(self, f, par_dic, by_m=False, cached=True):
         """
         Generate the full time series based on the given frequency array, using 
         finer frequencies at lower frequencies and coarse frequencies at higher frequencies.
@@ -974,6 +974,9 @@ class WaveformGenerator(utils.JSONMixin):
         # Populate time_series using the two interpolation functions
         for i, freq in enumerate(f):
             time_series[i] = t_interp(freq)
+            
+        if cached:
+            self._cached_t = time_series
     
         return time_series
 

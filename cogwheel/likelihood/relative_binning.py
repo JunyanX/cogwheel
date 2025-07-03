@@ -29,6 +29,7 @@ from cogwheel import gw_utils
 from cogwheel import utils
 from cogwheel import waveform
 from .likelihood import CBCLikelihood, check_bounds
+import time #debugging
 
 class BaseRelativeBinning(CBCLikelihood, ABC):
     """
@@ -147,8 +148,51 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         diff_phase_arr = np.linspace(0, diff_phase[-1], nbin + 1)
         fbin = np.interp(diff_phase_arr, diff_phase, f_arr)
 
+        if self.df:
+            fbin = self.refine_fbin_by_df(fbin)
+
+        if self.dt:
+            fbin = self.refine_fbin_by_dt(fbin)
+            
         self.fbin = fbin
         self._pn_phase_tol = pn_phase_tol
+        
+
+    def refine_fbin_by_df(self, fbin):
+        df = self.df
+        fbin = np.asarray(fbin)
+        refined = [fbin[0]]
+        for a, b in zip(fbin[:-1], fbin[1:]):
+            gap = b - a
+            if gap > df:
+                n = int(np.floor(gap / df))
+                points = a + np.arange(1, n+1) * df
+                points = points[points < b]
+                refined.extend(points.tolist())
+            refined.append(b)
+        return np.array(refined)
+        
+
+    def refine_fbin_by_dt(self, fbin):
+        dt = self.dt
+        f_full = self.event_data.frequencies[self.event_data.fslice]
+        ts = self.waveform_generator.time_series(f_full, self.par_dic_0)
+        fbin = np.asarray(fbin)
+        f_full = np.asarray(f_full)
+        ts = np.asarray(ts)
+        new_bins = []
+        for a, b in zip(fbin[:-1], fbin[1:]):
+            i0 = np.searchsorted(f_full, a, side='left')
+            i1 = np.searchsorted(f_full, b, side='left')
+            new_bins.append(a)
+            last_t = ts[i0]
+            for idx in range(i0 + 1, i1 + 1):
+                if abs(ts[idx] - last_t) > dt:
+                    new_bins.append(f_full[idx])
+                    last_t = ts[idx]
+        new_bins.append(fbin[-1])
+        return np.array(new_bins)
+        
 
     @property
     def fbin(self):

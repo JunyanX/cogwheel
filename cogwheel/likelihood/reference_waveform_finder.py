@@ -37,7 +37,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
-                   pn_phase_tol=.02, spline_degree=3,
+                   pn_phase_tol=.02, fbin=None, spline_degree=3,
                    time_range=(-.25, .25), mchirp_range=None, f_ref=None,
                    vary_polarization=False, doppler=False, use_cached=False,
                    dt=None, df=None, detector_size=False):
@@ -104,6 +104,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
                 ref_wf_finder = cls(event_data, waveform_generator,
                                     par_dic_0, pn_phase_tol=pn_phase_tol,
+                                    fbin=fbin,
                                     spline_degree=spline_degree,
                                     time_range=time_range,
                                     mchirp_range=mchirp_range,
@@ -142,6 +143,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         ref_wf_finder = cls(event_data, waveform_generator, par_dic_0,
                             pn_phase_tol=pn_phase_tol,
+                            fbin=fbin,
                             spline_degree=spline_degree,
                             time_range=time_range,
                             mchirp_range=mchirp_range,
@@ -375,7 +377,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         amp_bf = np.abs(d_h) / h_h
         return lnl, amp_bf, phase_bf
 
-    def _set_summary(self, time_chunked=True, time_chunk_size=32):
+    def _set_summary(self, time_chunked=True, time_chunk_size=8):
         """Set usual summary data plus `_d_h_timeseries_weights`.
     
         Args:
@@ -393,6 +395,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 # build only a small (chunk,1,1,nf) shifts array
                 shifts = np.exp(2j * np.pi * t_chunk[:, None, None, None]
                                 * self.event_data.frequencies)
+
                 # multiply out a small (chunk,1,3,nf) array
                 d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
     
@@ -407,7 +410,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             self._d_h_timeseries_weights = np.concatenate(weights_chunks, axis=0)
     
         else:
-            # all-at-once path (original code)
             shifts = np.exp(2j * np.pi * self._times.reshape(-1, 1, 1, 1)
                             * self.event_data.frequencies)
             d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
